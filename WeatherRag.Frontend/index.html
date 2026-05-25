@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AF Weather RAG — Local Briefing System</title>
+  <link rel="stylesheet" href="styles/styles.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <span class="header-emblem">☁</span>
+      <h1>AF Weather RAG</h1>
+      <span class="header-subtitle">Local Retrieval-Augmented Briefing System</span>
+    </div>
+  </header>
+
+  <main class="main">
+    <!-- Status Bar -->
+    <section class="card" id="status-section">
+      <h2>System Status</h2>
+      <div id="status-display" class="status-row">
+        <span class="status-label">Index Status:</span>
+        <span id="status-chunks" class="status-value">Loading…</span>
+        <button id="btn-refresh-status" class="btn btn-secondary">Refresh</button>
+      </div>
+    </section>
+
+    <!-- Ingest Section -->
+    <section class="card" id="ingest-section">
+      <h2>Ingest Document</h2>
+      <p class="section-desc">Upload one or more Air Force weather PDFs for indexing. Only PDF files are accepted.</p>
+      <form id="ingest-form" class="ingest-form">
+        <label for="pdf-file" class="file-label">Select PDF(s)</label>
+        <input type="file" id="pdf-file" accept=".pdf" multiple required />
+        <button type="submit" class="btn btn-primary" id="btn-ingest">Index Document</button>
+      </form>
+      <div id="ingest-progress" class="progress-bar" style="display:none">
+        <div class="progress-inner"></div>
+      </div>
+      <p id="ingest-status" class="feedback"></p>
+    </section>
+
+    <!-- Query Section -->
+    <section class="card" id="query-section">
+      <h2>Weather Query</h2>
+      <p class="section-desc">Ask an operationally relevant weather question. Answers are grounded in indexed documents.</p>
+      <form id="query-form" class="query-form">
+        <textarea
+          id="query-input"
+          class="query-input"
+          placeholder="e.g., What are the METAR observation procedures for ceilings below 1,000 ft AGL?"
+          rows="3"
+          required
+        ></textarea>
+        <button type="submit" class="btn btn-primary" id="btn-query">Submit Query</button>
+      </form>
+      <div id="query-spinner" class="spinner" style="display:none"></div>
+
+      <!-- Answer -->
+      <div id="answer-section" style="display:none">
+        <h3>Assessment</h3>
+        <div id="answer-text" class="answer-box"></div>
+        <div id="grounding-badge" class="badge"></div>
+        <p id="query-duration" class="section-desc"></p>
+
+        <h3>Source Citations</h3>
+        <ul id="citations-list" class="citations-list"></ul>
+      </div>
+
+      <p id="query-error" class="feedback error" style="display:none"></p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>LOCAL USE ONLY — NOT FOR OPERATIONAL RELEASE — All processing is offline.</p>
+  </footer>
+
+  <script src="src/app.js"></script>
+</body>
+</html>
