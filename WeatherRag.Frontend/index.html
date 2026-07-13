@@ -53,6 +53,10 @@
           rows="3"
           required
         ></textarea>
+        <label for="model-select" class="model-label">LLM Model:</label>
+        <select id="model-select" class="model-select">
+          <option value="">Loading models…</option>
+        </select>
         <button type="submit" class="btn btn-primary" id="btn-query">Submit Query</button>
       </form>
       <div id="query-spinner" class="spinner" style="display:none"></div>

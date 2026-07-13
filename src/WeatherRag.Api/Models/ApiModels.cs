@@ -3,6 +3,7 @@ namespace WeatherRag.Api.Models;
 public sealed record QueryRequest
 {
     public required string Query { get; init; }
+    public string? ModelId { get; init; }
 }
 
 public sealed record CitationDto
@@ -19,6 +20,14 @@ public sealed record QueryResponse
     public required IReadOnlyList<CitationDto> Citations { get; init; }
     public bool IsGrounded { get; init; }
     public long ElapsedMs { get; init; }
+}
+
+public sealed record ModelInfoDto
+{
+    public required string Id { get; init; }
+    public required string DisplayName { get; init; }
+    public bool IsAvailable { get; init; }
+    public bool IsDefault { get; init; }
 }
 
 public sealed record IndexStatusResponse

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using LLama;
 using LLama.Common;
@@ -14,9 +15,8 @@ public sealed class LlamaSharpInferenceService : IInferenceService, IDisposable
     private readonly InferenceOptions _options;
     private readonly WeatherBrieferPromptBuilder _promptBuilder;
     private readonly ILogger<LlamaSharpInferenceService> _logger;
-    private LLamaWeights? _weights;
-    private ModelParams? _modelParams;
-    private readonly object _loadLock = new();
+    private readonly ConcurrentDictionary<string, (LLamaWeights Weights, ModelParams Params)> _weightCache = new();
+    private readonly ConcurrentDictionary<string, object> _loadLocks = new();
 
     public LlamaSharpInferenceService(
         IOptions<InferenceOptions> options,
@@ -28,29 +28,55 @@ public sealed class LlamaSharpInferenceService : IInferenceService, IDisposable
         _logger = logger;
     }
 
-    private (LLamaWeights Weights, ModelParams Params) GetWeights()
+    private ModelProfile ResolveProfile(string? modelId)
     {
-        if (_weights is null || _modelParams is null)
+        var effectiveId = string.IsNullOrWhiteSpace(modelId) ? _options.DefaultModelId : modelId;
+
+        if (!_options.Models.TryGetValue(effectiveId, out var profile))
         {
-            lock (_loadLock)
+            _logger.LogWarning(
+                "Model ID '{ModelId}' not found in configuration. Falling back to default model '{DefaultModelId}'.",
+                effectiveId,
+                _options.DefaultModelId);
+
+            if (!_options.Models.TryGetValue(_options.DefaultModelId, out profile))
             {
-                if (_weights is null || _modelParams is null)
-                {
-                    var modelPath = Path.GetFullPath(_options.ModelPath);
-                    _logger.LogInformation("Loading LLaMA model from {Path}", modelPath);
-
-                    _modelParams = new ModelParams(modelPath)
-                    {
-                        ContextSize = (uint)_options.ContextSize,
-                        GpuLayerCount = _options.GpuLayerCount,
-                        Threads = _options.Threads
-                    };
-
-                    _weights = LLamaWeights.LoadFromFile(_modelParams);
-                }
+                throw new InvalidOperationException(
+                    $"Default model '{_options.DefaultModelId}' is not configured in Inference.Models.");
             }
         }
-        return (_weights, _modelParams);
+
+        return profile;
+    }
+
+    private (LLamaWeights Weights, ModelParams Params) GetWeightsForProfile(ModelProfile profile, string cacheKey)
+    {
+        if (_weightCache.TryGetValue(cacheKey, out var cached))
+            return cached;
+
+        var loadLock = _loadLocks.GetOrAdd(cacheKey, _ => new object());
+
+        lock (loadLock)
+        {
+            if (_weightCache.TryGetValue(cacheKey, out cached))
+                return cached;
+
+            var modelPath = Path.GetFullPath(profile.ModelPath);
+            _logger.LogInformation("Loading LLaMA model '{CacheKey}' from {Path}", cacheKey, modelPath);
+
+            var modelParams = new ModelParams(modelPath)
+            {
+                ContextSize = (uint)profile.ContextSize,
+                GpuLayerCount = profile.GpuLayerCount,
+                Threads = profile.Threads
+            };
+
+            var weights = LLamaWeights.LoadFromFile(modelParams);
+            var entry = (weights, modelParams);
+            _weightCache[cacheKey] = entry;
+
+            return entry;
+        }
     }
 
     public async Task<GenerationResponse> GenerateAsync(
@@ -73,17 +99,19 @@ public sealed class LlamaSharpInferenceService : IInferenceService, IDisposable
         GenerationRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var prompt = _promptBuilder.Build(request);
-        var (weights, modelParams) = GetWeights();
+        var profile = ResolveProfile(request.ModelId);
+        var cacheKey = request.ModelId ?? _options.DefaultModelId;
+        var (weights, modelParams) = GetWeightsForProfile(profile, cacheKey);
 
+        var prompt = _promptBuilder.Build(request);
         var executor = new StatelessExecutor(weights, modelParams, _logger);
         var inferenceParams = new InferenceParams
         {
-            MaxTokens = _options.MaxTokens,
+            MaxTokens = profile.MaxTokens,
             AntiPrompts = ["=== WEATHER QUERY ===", "[INST]"],
             SamplingPipeline = new DefaultSamplingPipeline
             {
-                Temperature = _options.Temperature
+                Temperature = profile.Temperature
             }
         };
 
@@ -93,7 +121,11 @@ public sealed class LlamaSharpInferenceService : IInferenceService, IDisposable
 
     public void Dispose()
     {
-        _weights?.Dispose();
-        _weights = null;
+        foreach (var (weights, _) in _weightCache.Values)
+        {
+            weights.Dispose();
+        }
+        _weightCache.Clear();
+        _loadLocks.Clear();
     }
 }

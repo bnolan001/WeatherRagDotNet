@@ -1,46 +1,34 @@
-# Project Mission & Persona
+# WeatherRagDotNet Copilot Instructions
 
-- Core Purpose: A local-first C# .NET web application for RAG (Retrieval-Augmented Generation) over Air Force weather documentation (PDFs with text and images).
+## Build, test, and lint commands
 
-- System Persona: When generating prompts or agent logic, the assistant must act as a Senior Air Force Weather Forecaster, Observer, and Briefer.
+Use solution/project-root commands unless a command explicitly changes directory.
 
-- Tone: Professional, authoritative, technically precise, and mission-focused. Use Air Force terminology (e.g., METAR, TAF, OWS, Jet Stream analysis) where appropriate.
+| Purpose | Command |
+|---|---|
+| Restore .NET dependencies | `dotnet restore WeatherRagDotNet.slnx` |
+| Build all projects | `dotnet build WeatherRagDotNet.slnx` |
+| Run all tests | `dotnet test WeatherRagDotNet.slnx` |
+| Run one test method | `dotnet test tests\WeatherRag.Tests\WeatherRag.Tests.csproj --filter "FullyQualifiedName~WeatherRag.Tests.Rag.OnnxSessionFactoryTests.BuildProviderPriority_DefaultsToOpenVinoDirectMlAndCpu"` |
+| Run API locally | `dotnet run --project src\WeatherRag.Api\WeatherRag.Api.csproj` |
+| Frontend TypeScript compile check | `cd WeatherRag.Frontend; npm ci; npx tsc -p tsconfig.json` |
 
-## Technical Stack & Local Optimization
+There is no dedicated lint script configured in this repository; use the TypeScript compile check above for frontend static checks.
 
-- Backend: .NET 8/9+ Web API or Blazor Server.
+## High-level architecture
 
-- Local Inference: Use Microsoft.Extensions.AI or Semantic Kernel.
+- **Composition root:** `src/WeatherRag.Api/Program.cs` wires `AddRagServices(...)` and `AddInferenceServices(...)`, enables Swagger/CORS, then eagerly loads persisted vectors (`IVectorStore.LoadAsync`) and runs embedding warmup (`IEmbeddingWarmupService.WarmupAsync`) before serving requests.
+- **RAG ingestion flow:** `IngestController` accepts PDF uploads, writes them under `Rag:DocumentStorePath`, then calls `DocumentIngestionService` to extract pages (`PdfPigExtractor`), chunk text (`TextChunkingService`), generate embeddings (`OnnxEmbeddingService`), and persist to `InMemoryVectorStore` JSON (`VectorStore:PersistencePath`).
+- **Query flow:** `QueryController` runs retrieval first (`IRetrievalService`), then generation (`IInferenceService`), and returns grounded response metadata (`answer`, citations, `isGrounded`, elapsed time).
+- **Inference flow:** `LlamaSharpInferenceService` resolves model profiles from `Inference:Models`, caches `LLamaWeights` per model id, and builds prompts through `WeatherBrieferPromptBuilder`.
+- **Frontend contract:** `WeatherRag.Frontend/src/app.ts` calls `/api/models`, `/api/ingest/upload`, `/api/query`, and `/api/health/index` against `http://localhost:5000`; UI assumes the API is running with CORS enabled.
 
-- Hardware Acceleration:
-  - Prioritize ONNX Runtime (Microsoft.ML.OnnxRuntime.DirectML) to utilize Windows DirectML for cross-vendor GPU support (Intel, NVIDIA, AMD).
+## Key conventions (repository-specific)
 
-  - Favor OpenVINO via .NET wrappers for Intel-specific NPU/GPU optimizations.
-
-  - If using local LLM services, assume integration with Ollama or LM Studio via REST APIs.
-
-- PDF Processing: Use Docling (via CLI/Process) or Aspose.PDF / iTextSharp for extracting text and image metadata.
-
-## RAG Architecture Rules
-
-- Vector Database: Use FAISS (via C# wrapper) or an in-memory provider like Microsoft.SemanticKernel.Connectors.Memory.Sqlite.
-
-- Embeddings: Always suggest local embedding models (e.g., all-MiniLM-L6-v2 via ONNX). Never suggest OpenAI/Azure OpenAI unless explicitly requested.
-
-- Image Handling: Since PDFs contain images, prioritize code that extracts image captions or uses a local vision model (e.g., LLaVA) to describe weather charts and satellite imagery.
-
-## Coding Standards (C#/.NET)
-
-- Asynchronous First: Use Task and ValueTask for all I/O and inference operations.
-
-- Memory Management: Since this runs locally, strictly use using blocks or IDisposable for document streams and large model weights to prevent memory leaks.
-
-- Dependency Injection: Use standard .NET DI for services, repositories, and AI kernels.
-
-- Performance: When suggesting loops for document indexing, prefer Parallel.ForEachAsync to maximize CPU usage.
-
-## Security & Privacy
-
-- Strictly Offline: Never suggest external API calls for data processing. All telemetry or data logging must be local-only.
-
-- Sanitization: Ensure Air Force document paths and metadata are handled securely within the local file system.
+- **Mission persona is mandatory in prompts:** generation prompts must preserve the Senior Air Force Weather Forecaster/Observer/Briefer role and the “insufficient data” fallback language in `WeatherBrieferPromptBuilder`.
+- **Offline-first only:** keep all retrieval/inference local; do not introduce cloud AI endpoints unless explicitly requested.
+- **Execution provider policy is ordered and normalized:** embedding provider selection is driven by `Embedding:ProviderPriority` with alias normalization (`DML` -> `DirectML`) and optional forced CPU fallback (`OnnxSessionFactory.BuildProviderPriority`).
+- **DirectML safety constraint:** `OnnxEmbeddingService` serializes ONNX session `Run(...)` calls with a semaphore because shared-session DirectML inference is treated as non-thread-safe.
+- **Path hardening is part of ingestion behavior:** ingestion sanitizes paths with `Path.GetFullPath` and rejects files outside `Rag:DocumentStorePath`; controllers also strip file names via `Path.GetFileName`.
+- **Reindex behavior is replace-by-source:** ingest always removes existing chunks for the same source file before add/save; delete path uses the same remove/save persistence pattern.
+- **Chunk provenance format matters across layers:** chunk IDs follow `{file}_p{page}_c{index}`, include page/source metadata, and attach page images only to the first chunk from that page.

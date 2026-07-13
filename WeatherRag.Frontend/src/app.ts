@@ -13,6 +13,60 @@ function formatElapsedMs(elapsedMs: number): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}.${milliseconds.toString().padStart(3, "0")}`;
 }
 
+interface ModelInfo {
+  id: string;
+  displayName: string;
+  isAvailable: boolean;
+  isDefault: boolean;
+}
+
+let availableModels: ModelInfo[] = [];
+
+async function fetchModels(): Promise<void> {
+  try {
+    const resp = await fetch(`${API_BASE}/api/models`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const models: ModelInfo[] = await resp.json();
+    availableModels = models;
+
+    const modelSelect = $("model-select") as HTMLSelectElement;
+    modelSelect.innerHTML = "";
+
+    for (const model of models) {
+      const option = document.createElement("option");
+      option.value = model.id;
+      option.textContent = model.displayName + (model.isDefault ? " (default)" : "");
+      option.disabled = !model.isAvailable;
+      if (!model.isAvailable) {
+        option.textContent += " — unavailable";
+      }
+      modelSelect.appendChild(option);
+    }
+
+    const savedModelId = localStorage.getItem("selectedModelId");
+    const savedModelExists = savedModelId && models.some(m => m.id === savedModelId && m.isAvailable);
+    const defaultModel = models.find(m => m.isDefault && m.isAvailable);
+    const firstAvailable = models.find(m => m.isAvailable);
+
+    if (savedModelExists) {
+      modelSelect.value = savedModelId!;
+    } else if (defaultModel) {
+      modelSelect.value = defaultModel.id;
+    } else if (firstAvailable) {
+      modelSelect.value = firstAvailable.id;
+    }
+  } catch (err: unknown) {
+    console.error("Failed to fetch models:", err);
+    const modelSelect = $("model-select") as HTMLSelectElement;
+    modelSelect.innerHTML = '<option value="">Failed to load models</option>';
+  }
+}
+
+$("model-select").addEventListener("change", (e: Event) => {
+  const select = e.target as HTMLSelectElement;
+  localStorage.setItem("selectedModelId", select.value);
+});
+
 async function fetchStatus(): Promise<void> {
   try {
     const resp = await fetch(`${API_BASE}/api/health/index`);
@@ -82,6 +136,9 @@ queryForm.addEventListener("submit", async (e: Event) => {
   const query = queryInput.value.trim();
   if (!query) return;
 
+  const modelSelect = $("model-select") as HTMLSelectElement;
+  const selectedModelId = modelSelect.value || null;
+
   const btn = $("btn-query") as HTMLButtonElement;
   const spinner = $("query-spinner");
   const answerSection = $("answer-section");
@@ -97,7 +154,7 @@ queryForm.addEventListener("submit", async (e: Event) => {
     const resp = await fetch(`${API_BASE}/api/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, modelId: selectedModelId }),
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.message ?? `HTTP ${resp.status}`);
@@ -127,4 +184,6 @@ queryForm.addEventListener("submit", async (e: Event) => {
   }
 });
 
+void fetchModels();
 void fetchStatus();
+

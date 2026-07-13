@@ -52,7 +52,8 @@ public sealed class QueryController : ControllerBase
             Query = request.Query,
             ContextPassages = results.Select(r => r.Chunk.Text).ToList(),
             Citations = results.Select(r =>
-                $"{Path.GetFileName(r.Chunk.SourceFile)}, page {r.Chunk.PageNumber}").ToList()
+                $"{Path.GetFileName(r.Chunk.SourceFile)}, page {r.Chunk.PageNumber}").ToList(),
+            ModelId = request.ModelId
         };
 
         var generationStopwatch = Stopwatch.StartNew();
